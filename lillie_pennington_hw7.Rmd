@@ -1,0 +1,303 @@
+---
+title: "HW7"
+author: "Lillie Pennington"
+date: "April 21, 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#data wrangling
+```{r}
+library("tidyverse")
+library("dplyr")
+require(corrplot)
+require(car)
+require(broom)
+
+wq <- read_csv("BayDeltaWQ.csv", col_names = TRUE, na = c("NA", "n/p", "n/a"), guess_max = 30000)
+ 
+library(lubridate)
+wq$year <- year(wq$SampleDate)
+wq$month <- month(wq$SampleDate)  
+
+wq.q <- wq%>%
+  group_by(year, month) %>% ##without this, values don't show??
+  filter(2003<year) %>% ##only years above 2003
+  filter(!(year==2004 && month < 10)) %>% #removing months outside of 2005 water year
+  filter(!(year==2012 && month > 9)) %>% #removing months outside of 2012 water year
+  select(month, everything()) %>% #move month column
+  select(year, everything()) %>% #move year column
+  summarise_if(is.numeric, mean, na.rm = TRUE) %>% #returns means of columns with numeric observations
+  select_if(~sum(!is.na(.)) > 0) %>% #removes columns that only have NAs
+  select(-X1) %>% #removes X1 column, an index
+  select_if(~sum(!is.na(.)) == 96) #cuts df to columns of the same length
+
+wq.q
+
+```
+#what follows is kinda jumbled, I apologize if there's any confusion, I tried to document my thought process
+
+
+#Be sure to show your work, including multiple model comparison (or step models), provide quantification and explain the reasoning behind your final model selection.
+```{r}
+lm1 <- step(lm(wq.q$`Chlorophyll a` ~ ., data = wq.q))
+lm1
+
+#Step:  AIC=87.97
+#wq.q$`Chlorophyll a` ~ year + `Conductance (EC)` + Oxygen + Temperature + 
+    #`Kjeldahl Nitrogen (Total)` + `Pheophytin a` + `Solids (Total Dissolved)`
+
+#this model has the fewest variables and the lowest AIC, so it is the most parsimonious while still accounting for additional variables
+
+##after doing my multicollinearity analyses above I noticed that EC and dissolved solids are correlated, and after googling I discovered that EC is a product of dissolved solids, so I'm doing a step with EC removed and also with depth removed because those observations don't make sense to me
+
+steplm <- step(lm(wq.q$`Chlorophyll a` ~ year + month+ 
+    SiteDepth + Fluorescence + Oxygen + `Secchi Depth` + Temperature + 
+    Turbidity + `Ammonia (Dissolved)` + `Chloride (Dissolved)` + 
+    `Kjeldahl Nitrogen (Total)` + `Nitrite + Nitrate (Dissolved)` + 
+    `Organic Nitrogen (Dissolved)` + `Ortho-phosphate (Dissolved)` + 
+    `Pheophytin a` + `Phosphorus (Total)` + `Silica (SiO2) (Dissolved)` + 
+    `Solids (Total Dissolved)` + `Solids (Total Suspended)` + 
+    `Solids (Volatile Suspended)`, data = wq.q))
+steplm
+
+#Step:  AIC=88.66; wq.q$`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`
+
+#I'm going to use this model because it is more parsimonious, and i think it's fair to take out EC since I was going to take it out anyway after my vif analyses. 
+
+
+
+steplmyrrm <- step(lm(wq.q$`Chlorophyll a` ~ 
+    SiteDepth + Fluorescence + Oxygen + `Secchi Depth` + Temperature + 
+    Turbidity + `Ammonia (Dissolved)` + `Chloride (Dissolved)` + 
+    `Kjeldahl Nitrogen (Total)` + `Nitrite + Nitrate (Dissolved)` + 
+    `Organic Nitrogen (Dissolved)` + `Ortho-phosphate (Dissolved)` + 
+    `Pheophytin a` + `Phosphorus (Total)` + `Silica (SiO2) (Dissolved)` + 
+    `Solids (Total Dissolved)` + `Solids (Total Suspended)` + 
+    `Solids (Volatile Suspended)`, data = wq.q))
+steplmyrrm
+
+```
+
+#Which variables are highly correlated with the others? How did you account for this?
+```{r fig.height=20, fig.width=20}
+wqcor <- cor(wq.q)
+
+wqcor
+
+wqcor.plot <- corrplot(wqcor, method = "circle")
+wqcor.plot
+
+#These are my vif analyses before i redid the stepwise regression
+#vif1 <- vif(lm(`Chlorophyll a` ~ year + `Conductance (EC)` + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` + `Pheophytin a` + `Solids (Total Dissolved)`, data = wq.q))
+#vif1 #EC and dissolved solids are very high, they are basically 
+
+#vif2 <- vif(lm(`Chlorophyll a` ~ year + `Conductance (EC)` + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` + `Pheophytin a`, data = wq.q))
+#vif2 ##without dissolved solids
+
+#vif3 <- vif(lm(`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a` + `Solids (Total Dissolved)`, data = wq.q))
+#vif3 ##without EC
+#they're both pretty similar-- since EC is a product of total dissolved solids I'm going to use the model with total dissolved solids; temperature and oxygen are higher than ten.. but I feel like they're both important
+
+vif4 <- vif(lm(wq.q$`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q))
+vif4 #temperature is high.. 
+
+vif5 <- vif(lm(wq.q$`Chlorophyll a` ~ year + Oxygen + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q))
+vif5 #now theyr'e all below 2.. let's see how they compare to each other. I want to leave temp in because I think it's important
+
+vif6 <- vif(lm(wq.q$`Chlorophyll a` ~ Oxygen + Temperature+ `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q))
+vif6 #after looking at linearity I realized I should probably take year out.. since.. it's not linear?
+```
+
+```{r}
+mlm1 <- lm(wq.q$`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q)
+
+mlm2 <- lm(wq.q$`Chlorophyll a` ~ year + Oxygen + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q)
+
+mlm3 <- lm(wq.q$`Chlorophyll a` ~ Oxygen + Temperature+ `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q)
+
+
+mlms <- list(temp = mlm1,  notemp = mlm2, noyear = mlm3)
+mlms.stats <- mapply(glance, mlms)
+colnames(mlms.stats) <- names(mlms)
+mlms.stats
+
+#my instincts are validated-- i'm going with the model that includes temperature because it has the higher r-squared, lower AIC, and lower BIC
+#I'm also going to keep year in because.. I think it's okay? 
+```
+
+#Be sure to demonstrate that you have accounted for all assumptions in your regression. Identify any badly fitted observations, discuss whether your residuals are following expected patterns, and discuss whether there are any possible explanations for any poorly modeled observations.
+```{r}
+lmfinal <- lm(wq.q$`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q)
+
+#plot data for linearity
+o2 <- ggplot(aes(x = wq.q$Oxygen, y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+
+temp <- ggplot(aes(x = wq.q$Temperature, y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+
+n2 <- ggplot(aes(x = wq.q$`Kjeldahl Nitrogen (Total)`, y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+
+phea <- ggplot(aes(x = wq.q$`Pheophytin a`, y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+
+
+#um these are all pretty bad so I'm going to log transform the x variable, to correct for linearity
+
+logo2 <- ggplot(aes(x = log(wq.q$Oxygen), y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+logo2
+
+logtemp <- ggplot(aes(x = log(wq.q$Temperature), y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+logtemp
+
+logn2 <- ggplot(aes(x = log(wq.q$`Kjeldahl Nitrogen (Total)`), y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+logn2
+
+logphea <- ggplot(aes(x = log(wq.q$`Pheophytin a`), y = wq.q$`Chlorophyll a`), data = wq.q) +
+  theme_bw() +
+  geom_point()
+logphea
+
+#truthfully these don't look much better so.. I am going to.. leave it because it is late I'm sorry; ideally i would try some different transformations
+
+
+```
+
+```{r}
+plot(residuals(lmfinal)) #Yes! This looks good! except for a few outliers the observations are evenly around zero
+
+```
+
+
+#Quantify how much variance in mean monthly Chl-a is explained by the variables you selected.
+```{r}
+
+lmfinal <- lm(wq.q$`Chlorophyll a` ~ year + Oxygen + Temperature + `Kjeldahl Nitrogen (Total)` +  `Pheophytin a`, data = wq.q)
+
+summary(lmfinal)
+
+#Adjusted R-squared:  0.5536; model accounts for ~55% of variation in ChlA
+
+```
+#creating wet/dry season variable
+```{r}
+#wet season oct-april Xu, L., & Baldocchi, D. D. (2004). Seasonal variation in carbon dioxide exchange over a Mediterranean annual grassland in California. Agricultural and Forest Meteorology, 123(1-2), 79-96.
+#dry season 6:9
+
+wq.s <- wq.q
+
+wq.s$season <- ifelse(wq.s$month == 6:9, 
+c("dry"), c("wet")) 
+
+wq.s <- wq.s %>%
+  select(season, everything())%>%
+  select(month, everything()) %>%
+ select(year, everything())
+
+wq.s
+
+```
+
+```{r fig.height=20, fig.width=20}
+wqcor <- cor(wq.q)
+
+wqcor
+
+wqcor.plot <- corrplot(wqcor, method = "circle")
+wqcor.plot
+
+##from corrplot above, pheophytin a is the most correlated; 0.59650269; some people mentioned using temperature instead of pheophytin a because pheophytin a is chlorophyll without magnesium.. but to me, it's a different compound and associated with different plants and a specific process, so I'm going go with pheophytin as the most correlated. Also, if pheophytin were truly the same as chlorophyll then they'd be perfectly correlated, right? So there must be some variance here.  
+
+lm2 <- lm(wq.s$`Chlorophyll a` ~ wq.s$season)
+lm2
+
+lm3 <- lm(wq.s$`Chlorophyll a` ~ wq.s$`Pheophytin a`)
+lm3
+
+lm4 <- lm(wq.s$`Chlorophyll a` ~ wq.s$season + wq.s$`Pheophytin a`)
+lm4
+
+#checking for linearity
+pheophytina <- ggplot(aes(x = wq.s$`Pheophytin a`, y = wq.s$`Chlorophyll a`), data = wq.s) +
+  theme_bw() +
+  geom_point()
+
+pheophytina #pretty good
+
+``` 
+
+#How much of the variation in Chl-a is explained by season? By your most important variable? By both together? Is the combined model better than individual models? 
+```{r}
+
+require(broom)
+lms <- list(season = lm2, pheophytina = lm3, season.pheophytina = lm4)
+lms.stats <- mapply(glance, lms)
+lms.stats
+
+##How much of the variation in Chl-a is explained by season?
+# 20% using adjusted rsquared
+
+# By your most important variable?
+# 34%
+
+#By both together?
+# 44%
+
+#Is the combined model better than individual models?
+# Yes, the AIC and BIC are lower for the combined
+
+
+```
+
+#In the parallel regression model (season and your most important variable as predictors), what are the differences in the means between seasons? What is the slope of the linear regression after accounting for season? How does this compare with the slope of the linear regression not considering season?
+
+```{r}
+summary(lm4)
+
+#slope with season: -1.5712; slope w/o season: 1.6184; when season is added the slope is negative which is.. weird right?
+
+
+
+```
+
+##Are residuals normally distributed?
+```{r}
+
+stem(residuals(lm4))
+
+#pretty normal but there may be some excess kurtosis
+```
+
+#Plot Chl-a vs your most important variable, with the observations colored by season. Add the paralell regression lines from the combined model in the appropraite colors, and add the univariate regression line.
+
+```{r}
+
+chla <- ggplot(wq.s, aes(x= wq.s$`Chlorophyll a`, y= wq.s$`Pheophytin a`, color=factor(wq.s$season))) +
+    geom_point() + labs(title = "Chlorophyll a ~ Pheophytin a\n", x = "Chlorophyll a", y = "Pheophytin a", color = "Legend\n") + geom_smooth(method='lm')
+
+
+chla
+
+#i dont think this is right but I'm not sure what to do
+
+```
+
+
+
