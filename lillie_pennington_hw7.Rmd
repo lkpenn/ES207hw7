@@ -27,17 +27,26 @@ wq$month <- month(wq$SampleDate)
 
 wq.q <- wq%>%
   group_by(year, month) %>% ##without this, values don't show??
-  filter(2003<year) %>% ##only years above 2003
-  filter(!(year==2004 && month < 10)) %>% #removing months outside of 2005 water year
-  filter(!(year==2012 && month > 9)) %>% #removing months outside of 2012 water year
+  filter( water_year >= 2005 & water_year <= 2012 ) %>% # filter all in one statement
   select(month, everything()) %>% #move month column
   select(year, everything()) %>% #move year column
   summarise_if(is.numeric, mean, na.rm = TRUE) %>% #returns means of columns with numeric observations
-  select_if(~sum(!is.na(.)) > 0) %>% #removes columns that only have NAs
+  discard(~all(is.na(.x))) %>% # another way to remove column with na
   select(-X1) %>% #removes X1 column, an index
   select_if(~sum(!is.na(.)) == 96) #cuts df to columns of the same length
 
 wq.q
+
+## christianas solution so you can see it all
+wq <- wq %>% mutate(SampleDate = mdy(SampleDate)) %>%
+  mutate(water_year = waterYear(SampleDate)) %>% #these two could be in the same statement the water year function comes from the smwrBase package
+  mutate(month_year = format(SampleDate, "%Y-%m"))%>% 
+  filter( water_year >= 2005 & water_year <= 2012 ) %>%
+  group_by(StationCode, month_year) %>%
+  summarise_if(is.numeric, mean, na.rm = T) %>% 
+  drop_na(`Chlorophyll a`) %>% discard(~all(is.na(.x))) %>%
+  map_df(~.x)
+
 
 ```
 #what follows is kinda jumbled, I apologize if there's any confusion, I tried to document my thought process
